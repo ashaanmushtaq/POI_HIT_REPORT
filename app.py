@@ -78,11 +78,11 @@ if uploaded_file:
     try:
         df_raw = pd.read_excel(uploaded_file, sheet_name=0, header=None)
         
-        # Detect Metadata
+        # Detect Metadata (Generated Date & Time Period)
         generated_at = str(df_raw.iloc[1, 1]).strip() if pd.notna(df_raw.iloc[1, 1]) else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         time_period = str(df_raw.iloc[2, 1]).strip() if pd.notna(df_raw.iloc[2, 1]) else "N/A"
 
-        # Find Header Row
+        # Find Data Header Row
         header_row_idx = -1
         for r in range(min(10, len(df_raw))):
             row_str = [str(x).strip().upper() for x in df_raw.iloc[r].tolist()]
@@ -103,46 +103,48 @@ if uploaded_file:
             not_picked_df = df_data[df_data['Vehicle_Clean'].str.upper() == 'NOT PICKED!'].copy()
             picked_df = df_data[df_data['Vehicle_Clean'].str.upper() != 'NOT PICKED!'].copy()
 
-            total_entries = len(df_data)
-            not_picked_count = len(not_picked_df)
-            picked_count = len(picked_df)
-            pick_percentage = (picked_count / total_entries * 100) if total_entries > 0 else 0
-
             # Exclude empty columns (#, Time, Proximity, PITB StopPointId) for Not Picked list
             empty_cols_to_remove = ['#', 'Time', 'Proximity', 'PITB StopPointId', 'Vehicle_Clean']
             clean_not_picked_cols = [c for c in headers if c not in empty_cols_to_remove]
-            
-            # Keep ALL 50 rows (No deduplication) & Assign Sequential Ser# (1, 2, 3, 4...)
+
+            # Not Picked Data (All 50 rows & Sequential Ser# 1, 2, 3...)
             display_not_picked = not_picked_df[clean_not_picked_cols].copy().reset_index(drop=True)
             display_not_picked['Ser#'] = range(1, len(display_not_picked) + 1)
 
-            display_picked = picked_df[headers].copy().reset_index(drop=True)
+            # Picked Data (Unique Picked Locations & Sequential Ser# 1, 2, 3...)
+            display_picked = picked_df.drop_duplicates(subset=['Cont#'])[headers].copy().reset_index(drop=True)
             display_picked['Ser#'] = range(1, len(display_picked) + 1)
 
+            # EXACT ACCURATE COUNTS
+            not_picked_count = len(display_not_picked)  # 50 Locations
+            picked_count = len(display_picked)          # 5 Unique Picked Locations
+            total_locations = not_picked_count + picked_count  # 55 Total Locations
+            pick_percentage = (picked_count / total_locations * 100) if total_locations > 0 else 0
+
             # ------------------------------------------------------------------
-            # WEB PORTAL OVERVIEW
+            # WEB PORTAL OVERVIEW & STATUS SUMMARY
             # ------------------------------------------------------------------
             st.markdown("---")
-            st.markdown("### 📊 Web Portal Overview & Status Summary")
+            st.markdown("### 📊 Web Portal Overview & Container Status")
             
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Selected City", selected_city)
-            m2.metric("Total POI Locations", total_entries)
+            m2.metric("Total POI Locations", total_locations)
             m3.metric("Picked Status", f"{picked_count} Picked", delta=f"{pick_percentage:.1f}% Completed")
             m4.metric("Not Picked / Pending", f"{not_picked_count} Pending", delta=f"-{100-pick_percentage:.1f}% Remaining", delta_color="inverse")
 
             st.info(f"🕒 **Generated Date:** {generated_at}  |  📅 **Time Period:** {time_period}")
 
-            # Status Breakdown Table
+            # Status Summary Table
             st.markdown("#### 📋 Container Picking Status Summary")
             status_summary_df = pd.DataFrame([
                 {"Status": "🟢 Picked Containers", "Count": picked_count, "Percentage": f"{pick_percentage:.1f}%"},
                 {"Status": "🔴 Not Picked / Pending", "Count": not_picked_count, "Percentage": f"{100-pick_percentage:.1f}%"},
-                {"Status": "🔹 Total Locations", "Count": total_entries, "Percentage": "100.0%"}
+                {"Status": "🔹 Total Locations", "Count": total_locations, "Percentage": "100.0%"}
             ])
             st.table(status_summary_df)
 
-            # Preview Table
+            # Not Picked Containers Preview
             st.markdown("---")
             st.markdown(f"### ⚠️ NOT PICKED CONTAINERS OR SKIPS REPORT ({not_picked_count} LOCATIONS)")
             
@@ -153,10 +155,11 @@ if uploaded_file:
             )
 
             # ------------------------------------------------------------------
-            # EXCEL GENERATOR
+            # EXCEL REPORT BUILDER
             # ------------------------------------------------------------------
             wb = openpyxl.Workbook()
             
+            # Formatting Styles
             font_title = Font(name='Segoe UI', size=15, bold=True, color='FFFFFF')
             font_sub = Font(name='Segoe UI', size=11, bold=True, color='FFFFFF')
             font_meta = Font(name='Segoe UI', size=10, italic=True, color='E2E8F0')
@@ -196,7 +199,7 @@ if uploaded_file:
             cell1.alignment = center_align
             ws_not_picked.row_dimensions[1].height = 36
 
-            # Row 2: NOT PICKED CONTAINERS OR SKIPS REPORT (<EXACT_COUNT> LOCATIONS)
+            # Row 2: NOT PICKED CONTAINERS OR SKIPS REPORT (50 LOCATIONS)
             ws_not_picked.merge_cells(start_row=2, start_column=1, end_row=2, end_column=num_np_cols)
             cell2 = ws_not_picked.cell(row=2, column=1, value=f"NOT PICKED CONTAINERS OR SKIPS REPORT ({not_picked_count} LOCATIONS)")
             cell2.font = font_sub
@@ -204,7 +207,7 @@ if uploaded_file:
             cell2.alignment = center_align
             ws_not_picked.row_dimensions[2].height = 28
 
-            # Row 3: Generated Date, Period & Right Corner Developed by
+            # Row 3: Generated Date, Period & Developed by on Right Corner
             ws_not_picked.merge_cells(start_row=3, start_column=1, end_row=3, end_column=num_np_cols)
             cell3 = ws_not_picked.cell(row=3, column=1, value=f"Generated: {generated_at}   |   Period: {time_period}   |   Developed by: Muhammad Ashaan")
             cell3.font = font_meta
@@ -263,7 +266,7 @@ if uploaded_file:
             ws_hits.merge_cells(start_row=2, start_column=1, end_row=2, end_column=num_cols)
             c2 = ws_hits.cell(row=2, column=1, value=f"SUCCESSFUL PICKED CONTAINERS ({picked_count} LOCATIONS)")
             c2.font = font_sub
-            c2.fill = PatternFill(start_color='15803D', end_color='15803D', fill_type='solid')
+            c2.fill = PatternFill(start_color='15803D', end_color='15803D', fill_type='solid') # Green
             c2.alignment = center_align
             ws_hits.row_dimensions[2].height = 28
 
@@ -307,7 +310,7 @@ if uploaded_file:
                     ws_hits.column_dimensions[col_letter].width = max(max_len + 4, 14)
 
             # --------------------------------------------------
-            # DOWNLOAD
+            # DOWNLOAD FILE
             # --------------------------------------------------
             excel_buffer = io.BytesIO()
             wb.save(excel_buffer)
