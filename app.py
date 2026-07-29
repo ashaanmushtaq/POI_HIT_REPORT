@@ -78,8 +78,8 @@ if uploaded_file:
     try:
         df_raw = pd.read_excel(uploaded_file, sheet_name=0, header=None)
         
-        # Detect Metadata
-        generated_at = str(df_raw.iloc[1, 1]).strip() if pd.notna(df_raw.iloc[1, 1]) else datetime.now().strftime("%Y-%m-%d")
+        # Detect Metadata (Generated Date & Time Period)
+        generated_at = str(df_raw.iloc[1, 1]).strip() if pd.notna(df_raw.iloc[1, 1]) else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         time_period = str(df_raw.iloc[2, 1]).strip() if pd.notna(df_raw.iloc[2, 1]) else "N/A"
 
         # Find Data Header Row
@@ -97,7 +97,7 @@ if uploaded_file:
             df_data = df_raw.iloc[header_row_idx + 1:].copy()
             df_data.columns = headers
 
-            # Clean and filter data
+            # Clean Vehicle status
             df_data['Vehicle_Clean'] = df_data['Vehicle'].astype(str).str.strip()
             
             not_picked_df = df_data[df_data['Vehicle_Clean'].str.upper() == 'NOT PICKED!'].copy()
@@ -108,42 +108,53 @@ if uploaded_file:
             picked_unique = picked_df['Cont#'].nunique()
             pick_percentage = (picked_unique / total_locations * 100) if total_locations > 0 else 0
 
-            # Filter columns for Not Picked (Exclude empty columns: '#', 'Time', 'Proximity', 'PITB StopPointId')
+            # Exclude empty columns (#, Time, Proximity, PITB StopPointId) for Not Picked list
             empty_cols_to_remove = ['#', 'Time', 'Proximity', 'PITB StopPointId', 'Vehicle_Clean']
             clean_not_picked_cols = [c for c in headers if c not in empty_cols_to_remove]
             
-            # Deduplicate by Cont# and assign Sequential Serial Numbers (1, 2, 3, 4...)
+            # Deduplicate & Assign Clean Sequential Ser# (1, 2, 3, 4...)
             display_not_picked = not_picked_df[clean_not_picked_cols].drop_duplicates(subset=['Cont#']).copy().reset_index(drop=True)
             display_not_picked['Ser#'] = range(1, len(display_not_picked) + 1)
 
-            # Sequential serial numbers for Picked Hits as well
             display_picked = picked_df[headers].copy().reset_index(drop=True)
             display_picked['Ser#'] = range(1, len(display_picked) + 1)
 
             # ------------------------------------------------------------------
-            # DASHBOARD METRICS & PREVIEW
+            # WEB PORTAL METRICS & CONTAINER STATUS SUMMARY
             # ------------------------------------------------------------------
-            st.markdown("### 📊 Executive Overview")
+            st.markdown("---")
+            st.markdown("### 📊 Web Portal Overview & Status Summary")
             
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Selected City", selected_city)
-            m2.metric("Total POI Locations", total_locations)
-            m3.metric("Picked Containers", picked_unique, delta=f"{pick_percentage:.1f}% Picked")
-            m4.metric("Not Picked Containers", not_picked_unique, delta=f"-{100-pick_percentage:.1f}% Missed", delta_color="inverse")
+            m2.metric("Total Containers / POIs", total_locations)
+            m3.metric("Picked Status", f"{picked_unique} Picked", delta=f"{pick_percentage:.1f}% Completed")
+            m4.metric("Not Picked / Pending", f"{not_picked_unique} Pending", delta=f"-{100-pick_percentage:.1f}% Remaining", delta_color="inverse")
 
-            st.info(f"📅 **Report Period:** {time_period} | 🕒 **Generated:** {generated_at}")
+            # Report Generation Metadata Display
+            st.info(f"🕒 **Generated Date:** {generated_at}  |  📅 **Time Period:** {time_period}")
 
+            # Container Status Breakup Table on Web Portal
+            st.markdown("#### 📋 Container Picking Status Summary")
+            status_summary_df = pd.DataFrame([
+                {"Status": "🟢 Picked Containers", "Count": picked_unique, "Percentage": f"{pick_percentage:.1f}%"},
+                {"Status": "🔴 Not Picked / Pending", "Count": not_picked_unique, "Percentage": f"{100-pick_percentage:.1f}%"},
+                {"Status": "🔹 Total Containers", "Count": total_locations, "Percentage": "100.0%"}
+            ])
+            st.table(status_summary_df)
+
+            # Not Picked Containers Preview
             st.markdown("---")
             st.markdown(f"### ⚠️ NOT PICKED CONTAINERS OR SKIPS REPORT ({not_picked_unique} LOCATIONS)")
             
             st.dataframe(
                 display_not_picked[['Ser#', 'Cont#', 'Vehicle', 'Latitude', 'Longitude']],
                 use_container_width=True,
-                height=340
+                height=320
             )
 
             # ------------------------------------------------------------------
-            # EXCEL REPORT BUILDER
+            # EXCEL REPORT BUILDER (EXACT STYLING)
             # ------------------------------------------------------------------
             wb = openpyxl.Workbook()
             
@@ -177,7 +188,6 @@ if uploaded_file:
             # --------------------------------------------------
             ws_not_picked = wb.active
             ws_not_picked.title = "Not Picked Containers"
-            
             num_np_cols = len(clean_not_picked_cols)
 
             # ROW 1: <CITY> POI HIT REPORT
@@ -196,9 +206,9 @@ if uploaded_file:
             cell2.alignment = center_align
             ws_not_picked.row_dimensions[2].height = 28
 
-            # ROW 3: METADATA & DEVELOPED BY MUHAMMAD ASHAAN ON RIGHT CORNER
+            # ROW 3: GENERATED DATE, PERIOD & DEVELOPED BY ON RIGHT CORNER
             ws_not_picked.merge_cells(start_row=3, start_column=1, end_row=3, end_column=num_np_cols)
-            cell3 = ws_not_picked.cell(row=3, column=1, value=f"Period: {time_period}   |   Developed by: Muhammad Ashaan")
+            cell3 = ws_not_picked.cell(row=3, column=1, value=f"Generated: {generated_at}   |   Period: {time_period}   |   Developed by: Muhammad Ashaan")
             cell3.font = font_meta
             cell3.fill = fill_meta
             cell3.alignment = right_align
@@ -228,10 +238,10 @@ if uploaded_file:
                         c.fill = fill_alt
                 row_idx += 1
 
-            # COLUMN WIDTH ADJUSTMENTS (Ser# strictly set to 9)
+            # COLUMN WIDTHS (Ser# strictly width 9)
             for col in ws_not_picked.columns:
                 col_letter = get_column_letter(col[0].column)
-                if col_letter == 'A':  # Ser# Column
+                if col_letter == 'A':
                     ws_not_picked.column_dimensions[col_letter].width = 9
                 else:
                     max_len = max(len(str(cell.value or '')) for cell in col)
@@ -259,9 +269,9 @@ if uploaded_file:
             c2.alignment = center_align
             ws_hits.row_dimensions[2].height = 28
 
-            # ROW 3: RIGHT CORNER DEVELOPED BY
+            # ROW 3: GENERATED DATE, PERIOD & RIGHT ALIGNED DEVELOPED BY
             ws_hits.merge_cells(start_row=3, start_column=1, end_row=3, end_column=num_cols)
-            c3 = ws_hits.cell(row=3, column=1, value=f"Period: {time_period}   |   Developed by: Muhammad Ashaan")
+            c3 = ws_hits.cell(row=3, column=1, value=f"Generated: {generated_at}   |   Period: {time_period}   |   Developed by: Muhammad Ashaan")
             c3.font = font_meta
             c3.fill = fill_meta
             c3.alignment = right_align
@@ -289,7 +299,7 @@ if uploaded_file:
                         c.fill = fill_alt
                 row_idx += 1
 
-            # COLUMN WIDTH ADJUSTMENTS (Ser# strictly set to 9)
+            # COLUMN WIDTHS (Ser# strictly width 9)
             for col in ws_hits.columns:
                 col_letter = get_column_letter(col[0].column)
                 if col_letter == 'A':
@@ -307,7 +317,7 @@ if uploaded_file:
 
             st.markdown("---")
             st.download_button(
-                label=f"📥 Download {selected_city} POI Executive Report (.xlsx)",
+                label=f"📥 Download {selected_city} Executive POI Report (.xlsx)",
                 data=excel_buffer,
                 file_name=f"{selected_city}_POI_Hit_Report_{datetime.now().strftime('%Y%m%d')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
